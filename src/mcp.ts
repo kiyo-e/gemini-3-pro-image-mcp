@@ -1,66 +1,66 @@
-// src/mcp.ts
-import { McpAgent } from "agents/mcp";
+// src/mcp.ts (stateless MCP server)
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 
-// 型をきれいにやりたいなら Env を cf-typegen で出してジェネリクスを付ければいいが、
-// サンプルとしては敢えてシンプルにしている。
-export class MyMCP extends McpAgent {
-  server = new McpServer({
+type Env = { GEMINI_API_KEY?: string } & Record<string, unknown>;
+
+export const createMcpServer = (env: Env) => {
+  const server = new McpServer({
     name: "gemini-3-pro-image",
     version: "0.0.1"
   });
 
-  async init() {
-    // 画像生成ツール
-    this.server.tool(
-      "gemini_generate_image",
-      "Generate an image using Gemini 3 Pro Image (gemini-3-pro-image-preview).",
-      {
-        prompt: z
-          .string()
-          .min(1)
-          .describe("Prompt text for the image to generate."),
-        aspectRatio: z
-          .enum([
-            "1:1",
-            "2:3",
-            "3:2",
-            "3:4",
-            "4:3",
-            "4:5",
-            "5:4",
-            "9:16",
-            "16:9",
-            "21:9"
-          ])
-          .optional()
-          .describe("Aspect ratio. Default is model's standard (e.g. 1:1)."),
-        imageSize: z
-          .enum(["1K", "2K", "4K"])
-          .optional()
-          .describe("Resolution. Default is 1K.")
-      },
-      async ({ prompt, aspectRatio, imageSize }) => {
-        // McpAgent から env を取る。型を気にしないなら any キャストで十分。
-        const apiKey = (this as any).env?.GEMINI_API_KEY as
-          | string
-          | undefined;
+  server.tool(
+    "gemini_generate_image",
+    "Generate an image using Gemini 3 Pro Image (gemini-3-pro-image-preview).",
+    {
+      prompt: z
+        .string()
+        .min(1)
+        .describe("Prompt text for the image to generate."),
+      aspectRatio: z
+        .enum([
+          "1:1",
+          "2:3",
+          "3:2",
+          "3:4",
+          "4:3",
+          "4:5",
+          "5:4",
+          "9:16",
+          "16:9",
+          "21:9"
+        ])
+        .optional()
+        .describe("Aspect ratio. Default is model's standard (e.g. 1:1)."),
+      imageSize: z
+        .enum(["1K", "2K", "4K"])
+        .optional()
+        .describe("Resolution. Default is 1K.")
+    },
+    async ({ prompt, aspectRatio, imageSize }) => {
+      const apiKey = env?.GEMINI_API_KEY;
+      console.log("[mcp] gemini_generate_image start", {
+        hasApiKey: Boolean(apiKey),
+        aspectRatio,
+        imageSize,
+        promptPreview: prompt.slice(0, 80)
+      });
 
-        if (!apiKey) {
-          return {
-            content: [
-              {
-                type: "text",
-                text: "GEMINI_API_KEY is not set in the environment."
-              }
-            ]
-          };
-        }
+      if (!apiKey) {
+        console.warn("[mcp] GEMINI_API_KEY missing");
+        return {
+          content: [
+            {
+              type: "text",
+              text: "GEMINI_API_KEY is not set in the environment."
+            }
+          ]
+        };
+      }
 
-        // Gemini 3 Pro Image REST API リクエストボディ
-        // https://aiplatform.googleapis.com/v1/publishers/google/models/gemini-3-pro-image-preview:generateContent
-        const body: any = {
+      try {
+        const body: Record<string, unknown> = {
           contents: [
             {
               role: "user",
@@ -82,25 +82,14 @@ export class MyMCP extends McpAgent {
             }
           },
           safetySettings: [
-            {
-              category: "HARM_CATEGORY_HATE_SPEECH",
-              threshold: "OFF"
-            },
-            {
-              category: "HARM_CATEGORY_DANGEROUS_CONTENT",
-              threshold: "OFF"
-            },
-            {
-              category: "HARM_CATEGORY_SEXUALLY_EXPLICIT",
-              "threshold": "OFF"
-            },
-            {
-              category: "HARM_CATEGORY_HARASSMENT",
-              threshold: "OFF"
-            }
+            { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "OFF" },
+            { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "OFF" },
+            { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "OFF" },
+            { category: "HARM_CATEGORY_HARASSMENT", threshold: "OFF" }
           ]
         };
 
+        console.log("[mcp] calling Gemini API");
         const resp = await fetch(
           `https://aiplatform.googleapis.com/v1/publishers/google/models/gemini-3-pro-image-preview:generateContent?key=${apiKey}`,
           {
@@ -111,9 +100,14 @@ export class MyMCP extends McpAgent {
             body: JSON.stringify(body)
           }
         );
+        console.log("[mcp] Gemini API response", {
+          status: resp.status,
+          statusText: resp.statusText
+        });
 
         if (!resp.ok) {
           const errorText = await resp.text().catch(() => "");
+          console.warn("[mcp] Gemini API error text", errorText?.slice(0, 500));
           return {
             content: [
               {
@@ -127,6 +121,7 @@ export class MyMCP extends McpAgent {
         }
 
         const json: any = await resp.json();
+        console.log("[mcp] Gemini API candidates count", json.candidates?.length ?? 0);
 
         const candidates = json.candidates ?? [];
         if (!candidates.length) {
@@ -141,50 +136,56 @@ export class MyMCP extends McpAgent {
         }
 
         const parts = candidates[0].content?.parts ?? [];
-
         const textPart = parts.find((p: any) => typeof p.text === "string");
         const imagePart = parts.find(
-          (p: any) =>
-            p.inlineData && typeof p.inlineData.data === "string"
+          (p: any) => p.inlineData && typeof p.inlineData.data === "string"
         );
 
-        // 画像が返ってこなかった場合はテキストだけ返す
         if (!imagePart) {
-          const fallbackText =
-            textPart?.text ??
-            "Gemini API response did not contain an image (inlineData).";
+          console.warn("[mcp] no image part returned", { hasText: Boolean(textPart?.text) });
           return {
             content: [
               {
                 type: "text",
-                text: fallbackText
+                text:
+                  textPart?.text ??
+                  "Gemini API response did not contain an image (inlineData)."
               }
             ]
           };
         }
 
-        // inlineData.data はすでに base64 エンコード済み
-        const imageData: string = imagePart.inlineData.data;
-        const mimeType: string =
-          imagePart.inlineData.mimeType ?? "image/png";
-
         const content: any[] = [];
 
-        if (textPart?.text) {
-          content.push({
-            type: "text",
-            text: textPart.text
-          });
-        }
+        // add a short caption so clients expecting text also have something to display
+        const caption = textPart?.text ?? "Image generated by Gemini 3 Pro Image";
+        content.push({ type: "text", text: caption });
 
         content.push({
           type: "image",
-          data: imageData, // base64
-          mimeType
+          data: imagePart.inlineData.data,
+          mimeType: imagePart.inlineData.mimeType ?? "image/png",
+          annotations: {
+            audience: ["user"],
+            priority: 0.9
+          }
         });
 
+        console.log("[mcp] returning content", { texts: content.filter((c) => c.type === "text").length, images: content.filter((c) => c.type === "image").length });
         return { content };
+      } catch (error) {
+        console.error("[mcp] unexpected error", error);
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Unexpected error: ${String(error)}`
+            }
+          ]
+        };
       }
-    );
-  }
-}
+    }
+  );
+
+  return server;
+};

@@ -1,26 +1,25 @@
 // src/index.tsx
 import { Hono } from "hono";
+import { createMcpHandler } from "agents/mcp";
 import { renderer } from "./renderer";
-import { MyMCP } from "./mcp";
-
-export { MyMCP }; // Durable Object としてエクスポート（wrangler.jsonc の class_name と合わせる）
+import { createMcpServer } from "./mcp";
 
 const app = new Hono();
 
 app.use(renderer);
 
-// MCP: SSE / HTTP エンドポイント
-// /sse は従来型 SSE Transport, /mcp は Streamable HTTP Transport
-app.mount("/sse", MyMCP.serveSSE("/sse").fetch, {
-  replaceRequest: false
-});
-app.mount("/mcp", MyMCP.serve("/mcp").fetch, {
-  replaceRequest: false
+app.use("*", async (c, next) => {
+  console.log(`[Request] ${c.req.method} ${c.req.url}`);
+  await next();
 });
 
-// 適当なトップページ（デバッグ用）
-app.get("/", (c) => {
-  return c.render(<h1>MCP Gemini 3 Pro Image Server</h1>);
+// MCP streamable HTTP endpoint (stateless)
+app.all("/mcp", async (c) => {
+  const handler = createMcpHandler(createMcpServer(c.env), { route: "/mcp" });
+  return handler(c.req.raw, c.env, c.executionCtx);
 });
+
+// Simple landing page (debug)
+app.get("/", (c) => c.render(<h1>MCP Gemini 3 Pro Image Server</h1>));
 
 export default app;

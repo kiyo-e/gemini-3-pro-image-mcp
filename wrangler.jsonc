@@ -2,28 +2,17 @@
     "$schema": "node_modules/wrangler/config-schema.json",
     "name": "mcp-gemini-image",
     "main": "./src/index.tsx",
-    "compatibility_date": "2025-03-10",
+    "compatibility_date": "2025-11-24",
     "compatibility_flags": [
         "nodejs_compat",
         "nodejs_compat_populate_process_env"
     ],
-    // MCP (McpAgent) 用の Durable Object
     "migrations": [
         {
-            "tag": "v1",
-            "new_sqlite_classes": [
-                "MyMCP"
-            ]
+            "tag": "v2-remove-mcp-do",
+            "deleted_classes": ["MyMCP"]
         }
     ],
-    "durable_objects": {
-        "bindings": [
-            {
-                "name": "MCP_OBJECT",
-                "class_name": "MyMCP"
-            }
-        ]
-    },
     "observability": {
         "logs": {
             "enabled": true
