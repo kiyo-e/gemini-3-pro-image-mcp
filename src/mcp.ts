@@ -59,40 +59,54 @@ export class MyMCP extends McpAgent {
         }
 
         // Gemini 3 Pro Image REST API リクエストボディ
-        // https://generativelanguage.googleapis.com/v1beta/models/gemini-3-pro-image-preview:generateContent :contentReference[oaicite:1]{index=1}
+        // https://aiplatform.googleapis.com/v1/publishers/google/models/gemini-3-pro-image-preview:generateContent
         const body: any = {
           contents: [
             {
+              role: "user",
               parts: [{ text: prompt }]
+            }
+          ],
+          generationConfig: {
+            temperature: 1,
+            maxOutputTokens: 32768,
+            responseModalities: ["IMAGE"],
+            topP: 0.95,
+            imageConfig: {
+              aspectRatio: aspectRatio ?? "1:1",
+              imageSize: imageSize ?? "1K",
+              imageOutputOptions: {
+                mimeType: "image/png"
+              },
+              personGeneration: "ALLOW_ALL"
+            }
+          },
+          safetySettings: [
+            {
+              category: "HARM_CATEGORY_HATE_SPEECH",
+              threshold: "OFF"
+            },
+            {
+              category: "HARM_CATEGORY_DANGEROUS_CONTENT",
+              threshold: "OFF"
+            },
+            {
+              category: "HARM_CATEGORY_SEXUALLY_EXPLICIT",
+              "threshold": "OFF"
+            },
+            {
+              category: "HARM_CATEGORY_HARASSMENT",
+              threshold: "OFF"
             }
           ]
         };
 
-        const generationConfig: any = {
-          responseModalities: ["IMAGE"]
-        };
-
-        const imageConfig: any = {};
-        if (aspectRatio) {
-          imageConfig.aspectRatio = aspectRatio;
-        }
-        if (imageSize) {
-          imageConfig.imageSize = imageSize;
-        }
-        if (Object.keys(imageConfig).length > 0) {
-          generationConfig.imageConfig = imageConfig;
-        }
-        if (Object.keys(generationConfig).length > 0) {
-          body.generationConfig = generationConfig;
-        }
-
         const resp = await fetch(
-          "https://generativelanguage.googleapis.com/v1beta/models/gemini-3-pro-image-preview:generateContent",
+          `https://aiplatform.googleapis.com/v1/publishers/google/models/gemini-3-pro-image-preview:generateContent?key=${apiKey}`,
           {
             method: "POST",
             headers: {
-              "Content-Type": "application/json",
-              "x-goog-api-key": apiKey
+              "Content-Type": "application/json"
             },
             body: JSON.stringify(body)
           }
