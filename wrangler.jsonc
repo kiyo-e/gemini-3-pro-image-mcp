@@ -23,5 +23,10 @@
                 "class_name": "MyMCP"
             }
         ]
+    },
+    "observability": {
+        "logs": {
+            "enabled": true
+        }
     }
 }
